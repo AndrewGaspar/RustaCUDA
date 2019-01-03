@@ -59,7 +59,7 @@ bitflags! {
     /// Flags which modify the behavior of CUDA array creation.
     #[derive(Default)]
     pub struct ArrayObjectFlags: c_uint {
-        /// Enables creation of layered CUDA array.s When this flag is set, depth specifies the
+        /// Enables creation of layered CUDA arrays. When this flag is set, depth specifies the
         /// number of layers, not the depth of a 3D array.
         const LAYERED = cuda_sys::cuda::CUDA_ARRAY3D_LAYERED;
 
@@ -82,46 +82,6 @@ impl ArrayObjectFlags {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Checks if LAYERED flag is set
-    pub fn layered(self) -> bool {
-        self.contains(ArrayObjectFlags::LAYERED)
-    }
-
-    /// Returns a copy of `self` with the LAYERED flag set
-    pub fn mark_layered(self) -> ArrayObjectFlags {
-        self | ArrayObjectFlags::LAYERED
-    }
-
-    /// Checks if SURFACE_LDST flag is set
-    pub fn surface_ldst(self) -> bool {
-        self.contains(ArrayObjectFlags::SURFACE_LDST)
-    }
-
-    /// Returns a copy of `self` with the SURFACE_LDST flag set
-    pub fn mark_surface_ldst(self) -> ArrayObjectFlags {
-        self | ArrayObjectFlags::SURFACE_LDST
-    }
-
-    /// Checks if CUBEMAP flag is set
-    pub fn cubemap(self) -> bool {
-        self.contains(ArrayObjectFlags::CUBEMAP)
-    }
-
-    /// Returns a copy of `self` with the CUBEMAP flag set
-    pub fn mark_cubemap(self) -> ArrayObjectFlags {
-        self | ArrayObjectFlags::CUBEMAP
-    }
-
-    /// Checks if TEXTURE_GATHER flag is set
-    pub fn texture_gather(self) -> bool {
-        self.contains(ArrayObjectFlags::TEXTURE_GATHER)
-    }
-
-    /// Returns a copy of `self` with the TEXTURE_GATHER flag set
-    pub fn mark_texture_gather(self) -> ArrayObjectFlags {
-        self | ArrayObjectFlags::TEXTURE_GATHER
-    }
 }
 
 /// Describes a CUDA Array
@@ -134,6 +94,25 @@ impl ArrayDescriptor {
     /// Constructs an ArrayDescriptor from a CUDA Driver API Array Descriptor.
     pub fn from_raw(desc: cuda_sys::cuda::CUDA_ARRAY3D_DESCRIPTOR) -> Self {
         Self { desc }
+    }
+
+    /// Constructs an ArrayDescriptor from dimensions, format, num_channels, and flags.
+    pub fn new(
+        dims: [usize; 3],
+        format: ArrayFormat,
+        num_channels: c_uint,
+        flags: ArrayObjectFlags,
+    ) -> Self {
+        Self {
+            desc: cuda_sys::cuda::CUDA_ARRAY3D_DESCRIPTOR {
+                Width: dims[0],
+                Height: dims[1],
+                Depth: dims[2],
+                Format: format.to_raw(),
+                NumChannels: num_channels,
+                Flags: flags.bits(),
+            },
+        }
     }
 
     /// Creates a new ArrayDescriptor from a set of dimensions and format.
@@ -162,12 +141,6 @@ impl ArrayDescriptor {
         self.desc.Depth = dims[2];
     }
 
-    /// Sets the dimensions of the ArrayDescriptor. Composes with other with_ routines.
-    pub fn with_dims(mut self, dims: [usize; 3]) -> Self {
-        self.set_dims(dims);
-        self
-    }
-
     /// Returns the width of the ArrayDescripor
     pub fn width(&self) -> usize {
         self.desc.Width
@@ -176,12 +149,6 @@ impl ArrayDescriptor {
     /// Sets the width of the ArrayDescriptor
     pub fn set_width(&mut self, width: usize) {
         self.desc.Width = width;
-    }
-
-    /// Sets the width of the ArrayDescriptor. Composes with other with_ routines.
-    pub fn mark_width(mut self, width: usize) -> Self {
-        self.set_width(width);
-        self
     }
 
     /// Returns the height of the ArrayDescripor
@@ -194,12 +161,6 @@ impl ArrayDescriptor {
         self.desc.Height = height;
     }
 
-    /// Sets the height of the ArrayDescriptor. Composes with other with_ routines.
-    pub fn with_height(mut self, height: usize) -> Self {
-        self.set_height(height);
-        self
-    }
-
     /// Returns the depth of the ArrayDescripor
     pub fn depth(&self) -> usize {
         self.desc.Depth
@@ -208,12 +169,6 @@ impl ArrayDescriptor {
     /// Sets the depth of the ArrayDescriptor
     pub fn set_depth(&mut self, depth: usize) {
         self.desc.Depth = depth;
-    }
-
-    /// Sets the depth of the ArrayDescriptor. Composes with other with_ routines.
-    pub fn with_depth(mut self, depth: usize) -> Self {
-        self.set_depth(depth);
-        self
     }
 
     /// Returns the format of the ArrayDescripor
@@ -226,12 +181,6 @@ impl ArrayDescriptor {
         self.desc.Format = format.to_raw();
     }
 
-    /// Sets the format of the ArrayDescriptor. Composes with other with_ routines.
-    pub fn with_format(mut self, format: ArrayFormat) -> Self {
-        self.set_format(format);
-        self
-    }
-
     /// Returns the number of channels in the ArrayDescriptor
     pub fn num_channels(&self) -> c_uint {
         self.desc.NumChannels
@@ -240,12 +189,6 @@ impl ArrayDescriptor {
     /// Sets the number of channels in the ArrayDescriptor
     pub fn set_num_channels(&mut self, num_channels: c_uint) {
         self.desc.NumChannels = num_channels;
-    }
-
-    /// Sets the number of channels in the ArrayDescriptor. Composes with other with_ routinese.
-    pub fn with_num_channels(mut self, num_channels: c_uint) -> Self {
-        self.set_num_channels(num_channels);
-        self
     }
 
     /// Returns the flags of the ArrayDescriptor
@@ -257,12 +200,6 @@ impl ArrayDescriptor {
     pub fn set_flags(&mut self, flags: ArrayObjectFlags) {
         self.desc.Flags = flags.bits();
     }
-
-    /// Sets the flags of the ArrayDescriptor. Composes with other with_ routines.
-    pub fn with_flags(mut self, flags: ArrayObjectFlags) -> Self {
-        self.set_flags(flags);
-        self
-    }
 }
 
 /// A CUDA Array. Can be bound to a texture or surface.
@@ -272,16 +209,17 @@ pub struct ArrayObject {
 
 impl ArrayObject {
     /// Constructs a generic ArrayObject
-    pub fn from_descriptor(descriptor: ArrayDescriptor) -> CudaResult<Self> {
-        // We validate the descriptor up front. This provides a good error message to the user.
-        assert_ne!(
+    pub fn from_descriptor(descriptor: &ArrayDescriptor) -> CudaResult<Self> {
+        // We validate the descriptor up front in debug mode. This provides a good error message to
+        // the user when they get something wrong, but doesn't re-validate in release mode.
+        debug_assert_ne!(
             0,
             descriptor.width(),
             "Cannot allocate an array with 0 Width"
         );
 
-        if !descriptor.flags().layered() && descriptor.depth() > 0 {
-            assert_ne!(
+        if !descriptor.flags().contains(ArrayObjectFlags::LAYERED) && descriptor.depth() > 0 {
+            debug_assert_ne!(
                 0,
                 descriptor.height(),
                 "If Depth is non-zero and the descriptor is not LAYERED, then Height must also be \
@@ -289,22 +227,22 @@ impl ArrayObject {
             );
         }
 
-        if descriptor.flags().cubemap() {
-            assert_eq!(
+        if descriptor.flags().contains(ArrayObjectFlags::CUBEMAP) {
+            debug_assert_eq!(
                 descriptor.height(),
                 descriptor.width(),
                 "Height and Width must be equal for CUBEMAP arrays."
             );
 
-            if descriptor.flags().layered() {
-                assert_eq!(
+            if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
+                debug_assert_eq!(
                     0,
                     descriptor.depth() % 6,
                     "Depth must be a multiple of 6 when the array descriptor is for a LAYERED \
                      CUBEMAP."
                 );
             } else {
-                assert_eq!(
+                debug_assert_eq!(
                     6,
                     descriptor.depth(),
                     "Depth must be equal to 6 when the array descriptor is for a CUBEMAP."
@@ -312,19 +250,108 @@ impl ArrayObject {
             }
         }
 
-        if descriptor.num_channels() != 1
-            && descriptor.num_channels() != 2
-            && descriptor.num_channels() != 4
-        {
-            panic!(
-                "NumChannels was set to {}. It must be 1, 2, or 4.",
-                descriptor.num_channels()
-            );
-        }
+        debug_assert!(
+            descriptor.num_channels() == 1
+                || descriptor.num_channels() == 2
+                || descriptor.num_channels() == 4,
+            "NumChannels was set to {}. It must be 1, 2, or 4.",
+            descriptor.num_channels()
+        );
 
         let mut handle = unsafe { std::mem::uninitialized() };
         unsafe { cuda_sys::cuda::cuArray3DCreate_v2(&mut handle, &descriptor.desc) }.to_result()?;
         Ok(Self { handle })
+    }
+
+    /// Creates a new CUDA Array.
+    ///
+    /// `dims` contains the extents of the array. `dims[0]` must be non-zero. `dims[1]` must be
+    /// non-zero if `dims[2]` is non-zero. The rank of the array is equal to the number of non-zero
+    /// `dims`.
+    ///
+    /// `format` determines the data-type of the array.
+    ///
+    /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    ///
+    /// ```
+    /// use rustacuda::memory::array::{ArrayObject, ArrayFormat};
+    ///
+    /// let one_dim_array = ArrayObject::new([10, 0, 0], ArrayFormat::Float, 1);
+    /// let two_dim_array = ArrayObject::new([10, 12, 0], ArrayFormat::Float, 1);
+    /// let three_dim_array = ArrayObject::new([10, 12, 14], ArrayFormat::Float, 1);    
+    /// ```
+    pub fn new(dims: [usize; 3], format: ArrayFormat, num_channels: c_uint) -> CudaResult<Self> {
+        Self::from_descriptor(&ArrayDescriptor::new(
+            dims,
+            format,
+            num_channels,
+            Default::default(),
+        ))
+    }
+
+    /// Creates a new Layered 1D or 2D CUDA Array.
+    ///
+    /// `dims` contains the extents of the array. `dims[0]` must be non-zero. The rank of the array
+    /// is equivalent to the number of non-zero dimensions.
+    ///
+    /// `num_layers` determines the number of layers in the array.
+    ///
+    /// `format` determines the data-type of the array.
+    ///
+    /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    pub fn new_layered(
+        dims: [usize; 2],
+        num_layers: usize,
+        format: ArrayFormat,
+        num_channels: c_uint,
+    ) -> CudaResult<Self> {
+        Self::from_descriptor(&ArrayDescriptor::new(
+            [dims[0], dims[1], num_layers],
+            format,
+            num_channels,
+            ArrayObjectFlags::LAYERED,
+        ))
+    }
+
+    /// Creates a new Cubemap CUDA Array. The array is represented as 6 side x side 2D arrays.
+    ///
+    /// `side` is the length of an edge of the cube.
+    ///
+    /// `format` determines the data-type of the array.
+    ///
+    /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    pub fn new_cubemap(side: usize, format: ArrayFormat, num_channels: c_uint) -> CudaResult<Self> {
+        Self::from_descriptor(&ArrayDescriptor::new(
+            [side, side, 6],
+            format,
+            num_channels,
+            ArrayObjectFlags::CUBEMAP,
+        ))
+    }
+
+    /// Creates a new Layered Cubemap CUDA Array. The array is represented as multiple 6 side x side
+    /// 2D arrays.
+    ///
+    /// `side` is the length of an edge of the cube.
+    ///
+    /// `num_layers` is the number of cubemaps in the array. The actual "depth" of the array is
+    /// `num_layers * 6`.
+    ///
+    /// `format` determines the data-type of the array.
+    ///
+    /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    pub fn new_layered_cubemap(
+        side: usize,
+        num_layers: usize,
+        format: ArrayFormat,
+        num_channels: c_uint,
+    ) -> CudaResult<Self> {
+        Self::from_descriptor(&ArrayDescriptor::new(
+            [side, side, num_layers * 6],
+            format,
+            num_channels,
+            ArrayObjectFlags::CUBEMAP,
+        ))
     }
 
     /// Gets the descriptor associated with this array.
@@ -368,10 +395,7 @@ mod test {
     fn descriptor_round_trip() {
         let _context = crate::quick_init().unwrap();
 
-        let obj = ArrayObject::from_descriptor(
-            ArrayDescriptor::from_dims_format([1, 2, 3], ArrayFormat::Float).with_num_channels(2),
-        )
-        .unwrap();
+        let obj = ArrayObject::new([1, 2, 3], ArrayFormat::Float, 2).unwrap();
 
         let descriptor = obj.descriptor().unwrap();
         assert_eq!([1, 2, 3], descriptor.dims());
@@ -384,11 +408,7 @@ mod test {
     fn allow_1d_arrays() {
         let _context = crate::quick_init().unwrap();
 
-        let obj = ArrayObject::from_descriptor(ArrayDescriptor::from_dims_format(
-            [10, 0, 0],
-            ArrayFormat::Float,
-        ))
-        .unwrap();
+        let obj = ArrayObject::new([10, 0, 0], ArrayFormat::Float, 1).unwrap();
 
         let descriptor = obj.descriptor().unwrap();
         assert_eq!([10, 0, 0], descriptor.dims());
@@ -398,11 +418,7 @@ mod test {
     fn allow_2d_arrays() {
         let _context = crate::quick_init().unwrap();
 
-        let obj = ArrayObject::from_descriptor(ArrayDescriptor::from_dims_format(
-            [10, 20, 0],
-            ArrayFormat::Float,
-        ))
-        .unwrap();
+        let obj = ArrayObject::new([10, 20, 0], ArrayFormat::Float, 1).unwrap();
 
         let descriptor = obj.descriptor().unwrap();
         assert_eq!([10, 20, 0], descriptor.dims());
@@ -412,11 +428,7 @@ mod test {
     fn allow_1d_layered_arrays() {
         let _context = crate::quick_init().unwrap();
 
-        let obj = ArrayObject::from_descriptor(
-            ArrayDescriptor::from_dims_format([10, 0, 20], ArrayFormat::Float)
-                .with_flags(ArrayObjectFlags::LAYERED),
-        )
-        .unwrap();
+        let obj = ArrayObject::new_layered([10, 0], 20, ArrayFormat::Float, 1).unwrap();
 
         let descriptor = obj.descriptor().unwrap();
         assert_eq!([10, 0, 20], descriptor.dims());
@@ -427,11 +439,7 @@ mod test {
     fn allow_cubemaps() {
         let _context = crate::quick_init().unwrap();
 
-        let obj = ArrayObject::from_descriptor(
-            ArrayDescriptor::from_dims_format([4, 4, 6], ArrayFormat::Float)
-                .with_flags(ArrayObjectFlags::CUBEMAP),
-        )
-        .unwrap();
+        let obj = ArrayObject::new_cubemap(4, ArrayFormat::Float, 1).unwrap();
 
         let descriptor = obj.descriptor().unwrap();
         assert_eq!([4, 4, 6], descriptor.dims());
@@ -442,11 +450,7 @@ mod test {
     fn allow_layered_cubemaps() {
         let _context = crate::quick_init().unwrap();
 
-        let obj = ArrayObject::from_descriptor(
-            ArrayDescriptor::from_dims_format([4, 4, 24], ArrayFormat::Float)
-                .with_flags(ArrayObjectFlags::new().mark_layered().mark_cubemap()),
-        )
-        .unwrap();
+        let obj = ArrayObject::new_layered_cubemap(4, 4, ArrayFormat::Float, 1).unwrap();
 
         let descriptor = obj.descriptor().unwrap();
         assert_eq!([4, 4, 24], descriptor.dims());
@@ -457,89 +461,59 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "\
-assertion failed: `(left != right)`
-  left: `0`,
- right: `0`: Cannot allocate an array with 0 Width")]
+    #[should_panic]
     fn fail_on_zero_size_widths() {
         let _context = crate::quick_init().unwrap();
 
-        let _ = ArrayObject::from_descriptor(ArrayDescriptor::from_dims_format(
-            [0, 10, 20],
-            ArrayFormat::Float,
-        ))
-        .unwrap();
+        let _ = ArrayObject::new([0, 10, 20], ArrayFormat::Float, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(expected = "\
-assertion failed: `(left == right)`
-  left: `3`,
- right: `2`: Height and Width must be equal for CUBEMAP arrays.")]
+    #[should_panic]
     fn fail_cubemaps_with_unmatching_width_height() {
         let _context = crate::quick_init().unwrap();
 
-        let _ = ArrayObject::from_descriptor(
-            ArrayDescriptor::from_dims_format([2, 3, 6], ArrayFormat::Float)
-                .with_flags(ArrayObjectFlags::CUBEMAP),
-        )
-        .unwrap();
+        let mut descriptor = ArrayDescriptor::from_dims_format([2, 3, 6], ArrayFormat::Float);
+        descriptor.set_flags(ArrayObjectFlags::CUBEMAP);
+
+        let _ = ArrayObject::from_descriptor(&descriptor).unwrap();
     }
 
     #[test]
-    #[should_panic(expected = "\
-assertion failed: `(left == right)`
-  left: `6`,
- right: `5`: Depth must be equal to 6 when the array descriptor is for a CUBEMAP.")]
+    #[should_panic]
     fn fail_cubemaps_with_non_six_depth() {
         let _context = crate::quick_init().unwrap();
 
-        let _ = ArrayObject::from_descriptor(
-            ArrayDescriptor::from_dims_format([4, 4, 5], ArrayFormat::Float)
-                .with_flags(ArrayObjectFlags::CUBEMAP),
-        )
-        .unwrap();
+        let mut descriptor = ArrayDescriptor::from_dims_format([4, 4, 5], ArrayFormat::Float);
+        descriptor.set_flags(ArrayObjectFlags::CUBEMAP);
+
+        let _ = ArrayObject::from_descriptor(&descriptor).unwrap();
     }
 
     #[test]
-    #[should_panic(expected = "\
-assertion failed: `(left == right)`
-  left: `0`,
- right: `4`: Depth must be a multiple of 6 when the array descriptor is for a LAYERED CUBEMAP.")]
+    #[should_panic]
     fn fail_cubemaps_with_non_six_multiple_depth() {
         let _context = crate::quick_init().unwrap();
 
-        let _ = ArrayObject::from_descriptor(
-            ArrayDescriptor::from_dims_format([4, 4, 10], ArrayFormat::Float)
-                .with_flags(ArrayObjectFlags::LAYERED | ArrayObjectFlags::CUBEMAP),
-        )
-        .unwrap();
+        let mut descriptor = ArrayDescriptor::from_dims_format([4, 4, 10], ArrayFormat::Float);
+        descriptor.set_flags(ArrayObjectFlags::LAYERED | ArrayObjectFlags::CUBEMAP);
+
+        let _ = ArrayObject::from_descriptor(&descriptor).unwrap();
     }
 
     #[test]
-    #[should_panic(expected = "\
-assertion failed: `(left != right)`
-  left: `0`,
- right: `0`: If Depth is non-zero and the descriptor is not LAYERED, then Height must also be \
-             non-zero.")]
+    #[should_panic]
     fn fail_with_depth_without_height() {
         let _context = crate::quick_init().unwrap();
 
-        let _ = ArrayObject::from_descriptor(ArrayDescriptor::from_dims_format(
-            [10, 0, 20],
-            ArrayFormat::Float,
-        ))
-        .unwrap();
+        let _ = ArrayObject::new([10, 0, 20], ArrayFormat::Float, 1).unwrap();
     }
 
     #[test]
-    #[should_panic(expected = "NumChannels was set to 3. It must be 1, 2, or 4.")]
+    #[should_panic]
     fn fails_on_invalid_num_channels() {
         let _context = crate::quick_init().unwrap();
 
-        let _ = ArrayObject::from_descriptor(
-            ArrayDescriptor::from_dims_format([1, 2, 3], ArrayFormat::Float).with_num_channels(3),
-        )
-        .unwrap();
+        let _ = ArrayObject::new([1, 2, 3], ArrayFormat::Float, 3).unwrap();
     }
 }
