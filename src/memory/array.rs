@@ -1,3 +1,8 @@
+//! Routines for allocating and using CUDA Array Objects.
+//!
+//! Detailed documentation about allocating CUDA Arrays can be found in the
+//! [CUDA Driver API](https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__MEM.html#group__CUDA__MEM_1gc2322c70b38c2984536c90ed118bb1d7)
+
 use std::os::raw::c_uint;
 
 use cuda_sys::cuda::{CUarray, CUarray_format, CUarray_format_enum};
@@ -208,7 +213,7 @@ pub struct ArrayObject {
 }
 
 impl ArrayObject {
-    /// Constructs a generic ArrayObject
+    /// Constructs a generic ArrayObject from an `ArrayDescriptor`.
     pub fn from_descriptor(descriptor: &ArrayDescriptor) -> CudaResult<Self> {
         // We validate the descriptor up front in debug mode. This provides a good error message to
         // the user when they get something wrong, but doesn't re-validate in release mode.
@@ -263,7 +268,7 @@ impl ArrayObject {
         Ok(Self { handle })
     }
 
-    /// Creates a new CUDA Array.
+    /// Allocates a new CUDA Array that is up to 3-dimensions.
     ///
     /// `dims` contains the extents of the array. `dims[0]` must be non-zero. `dims[1]` must be
     /// non-zero if `dims[2]` is non-zero. The rank of the array is equal to the number of non-zero
@@ -274,15 +279,80 @@ impl ArrayObject {
     /// `num_channels` determines the number of channels per array element (1, 2, or 4).
     ///
     /// ```
+    /// # use rustacuda::*;
+    /// # use std::error::Error;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # let _ctx = quick_init()?;
     /// use rustacuda::memory::array::{ArrayObject, ArrayFormat};
     ///
-    /// let one_dim_array = ArrayObject::new([10, 0, 0], ArrayFormat::Float, 1);
-    /// let two_dim_array = ArrayObject::new([10, 12, 0], ArrayFormat::Float, 1);
-    /// let three_dim_array = ArrayObject::new([10, 12, 14], ArrayFormat::Float, 1);    
+    /// let one_dim_array = ArrayObject::new([10, 0, 0], ArrayFormat::Float, 1)?;
+    /// let two_dim_array = ArrayObject::new([10, 12, 0], ArrayFormat::Float, 1)?;
+    /// let three_dim_array = ArrayObject::new([10, 12, 14], ArrayFormat::Float, 1)?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn new(dims: [usize; 3], format: ArrayFormat, num_channels: c_uint) -> CudaResult<Self> {
         Self::from_descriptor(&ArrayDescriptor::new(
             dims,
+            format,
+            num_channels,
+            Default::default(),
+        ))
+    }
+
+    /// Allocates a new 1D CUDA Array.
+    ///
+    /// `width` must be non-zero.
+    ///
+    /// `format` determines the data-type of the array.
+    ///
+    /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    ///
+    /// ```
+    /// # use rustacuda::*;
+    /// # use std::error::Error;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # let _ctx = quick_init()?;
+    /// use rustacuda::memory::array::{ArrayObject, ArrayFormat};
+    ///
+    /// // Allocates a 1D array of 10 single-precision, single-channel floating point values.
+    /// let one_dim_array = ArrayObject::new_1d(10, ArrayFormat::Float, 1)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new_1d(width: usize, format: ArrayFormat, num_channels: c_uint) -> CudaResult<Self> {
+        Self::from_descriptor(&ArrayDescriptor::new(
+            [width, 0, 0],
+            format,
+            num_channels,
+            Default::default(),
+        ))
+    }
+
+    /// Allocates a new CUDA Array that is up to 2-dimensions.
+    ///
+    /// `dims` contains the extents of the array. `dims[0]` must be non-zero. The rank of the array
+    /// is equal to the number of non-zero `dims`.
+    ///
+    /// `format` determines the data-type of the array.
+    ///
+    /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    ///
+    /// ```
+    /// # use rustacuda::*;
+    /// # use std::error::Error;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # let _ctx = quick_init()?;
+    /// use rustacuda::memory::array::{ArrayObject, ArrayFormat};
+    ///
+    /// // Allocates an 8x24 array of single-precision, single-channel floating point values.
+    /// let one_dim_array = ArrayObject::new_2d([8, 24], ArrayFormat::Float, 1)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new_2d(dims: [usize; 2], format: ArrayFormat, num_channels: c_uint) -> CudaResult<Self> {
+        Self::from_descriptor(&ArrayDescriptor::new(
+            [dims[0], dims[1], 0],
             format,
             num_channels,
             Default::default(),
@@ -299,6 +369,20 @@ impl ArrayObject {
     /// `format` determines the data-type of the array.
     ///
     /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    ///
+    /// ```
+    /// # use rustacuda::*;
+    /// # use std::error::Error;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # let _ctx = quick_init()?;
+    /// use rustacuda::memory::array::{ArrayObject, ArrayFormat};
+    ///
+    /// // Allocates a 7x8 array with 10 layers of single-precision, single-channel floating
+    /// // point values.
+    /// let layered_array = ArrayObject::new_layered([7, 8], 10, ArrayFormat::Float, 1)?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new_layered(
         dims: [usize; 2],
         num_layers: usize,
@@ -313,6 +397,43 @@ impl ArrayObject {
         ))
     }
 
+    /// Creates a new Layered 1D CUDA Array.
+    ///
+    /// `width` must be non-zero.
+    ///
+    /// `num_layers` determines the number of layers in the array.
+    ///
+    /// `format` determines the data-type of the array.
+    ///
+    /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    ///
+    /// ```
+    /// # use rustacuda::*;
+    /// # use std::error::Error;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # let _ctx = quick_init()?;
+    /// use rustacuda::memory::array::{ArrayObject, ArrayFormat};
+    ///
+    /// // Allocates a 5-element array with 10 layers of single-precision, single-channel floating
+    /// // point values.
+    /// let layered_array = ArrayObject::new_layered_1d(5, 10, ArrayFormat::Float, 1)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new_layered_1d(
+        width: usize,
+        num_layers: usize,
+        format: ArrayFormat,
+        num_channels: c_uint,
+    ) -> CudaResult<Self> {
+        Self::from_descriptor(&ArrayDescriptor::new(
+            [width, 0, num_layers],
+            format,
+            num_channels,
+            ArrayObjectFlags::LAYERED,
+        ))
+    }
+
     /// Creates a new Cubemap CUDA Array. The array is represented as 6 side x side 2D arrays.
     ///
     /// `side` is the length of an edge of the cube.
@@ -320,6 +441,23 @@ impl ArrayObject {
     /// `format` determines the data-type of the array.
     ///
     /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    ///
+    /// ```
+    /// # use rustacuda::*;
+    /// # use std::error::Error;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # let _ctx = quick_init()?;
+    /// use rustacuda::memory::array::{ArrayObject, ArrayFormat};
+    ///
+    /// // Allocates an 8x8 Cubemap array of single-precision, single-channel floating point
+    /// // numbers.
+    /// let layered_array = ArrayObject::new_cubemap(8, ArrayFormat::Float, 1)?;
+    ///
+    /// // All non-layered cubemap arrays have a depth of 6.
+    /// assert_eq!(6, layered_array.descriptor()?.depth());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new_cubemap(side: usize, format: ArrayFormat, num_channels: c_uint) -> CudaResult<Self> {
         Self::from_descriptor(&ArrayDescriptor::new(
             [side, side, 6],
@@ -340,6 +478,23 @@ impl ArrayObject {
     /// `format` determines the data-type of the array.
     ///
     /// `num_channels` determines the number of channels per array element (1, 2, or 4).
+    ///
+    /// ```
+    /// # use rustacuda::*;
+    /// # use std::error::Error;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// # let _ctx = quick_init()?;
+    /// use rustacuda::memory::array::{ArrayObject, ArrayFormat};
+    ///
+    /// // Allocates an 8x8 Layered Cubemap array of single-precision, single-channel floating point
+    /// // values with 5 layers.
+    /// let layered_array = ArrayObject::new_layered_cubemap(8, 5, ArrayFormat::Float, 1)?;
+    ///
+    /// // The depth of a layered cubemap array is equal to the number of layers * 6.
+    /// assert_eq!(30, layered_array.descriptor()?.depth());
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new_layered_cubemap(
         side: usize,
         num_layers: usize,
@@ -350,7 +505,7 @@ impl ArrayObject {
             [side, side, num_layers * 6],
             format,
             num_channels,
-            ArrayObjectFlags::CUBEMAP,
+            ArrayObjectFlags::CUBEMAP | ArrayObjectFlags::LAYERED,
         ))
     }
 
@@ -458,6 +613,14 @@ mod test {
             ArrayObjectFlags::CUBEMAP | ArrayObjectFlags::LAYERED,
             descriptor.flags()
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn fail_on_zero_width_1d_array() {
+        let _context = crate::quick_init().unwrap();
+
+        let _ = ArrayObject::new_1d(0, ArrayFormat::Float, 1).unwrap();
     }
 
     #[test]
