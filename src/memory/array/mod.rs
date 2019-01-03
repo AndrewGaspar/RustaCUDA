@@ -7,6 +7,8 @@ use std::os::raw::c_uint;
 
 use cuda_sys::cuda::{CUarray, CUarray_format, CUarray_format_enum};
 
+use crate::context::CurrentContext;
+use crate::device::DeviceAttribute;
 use crate::error::*;
 
 /// Describes the format used for a CUDA Array.
@@ -217,51 +219,137 @@ impl ArrayObject {
     pub fn from_descriptor(descriptor: &ArrayDescriptor) -> CudaResult<Self> {
         // We validate the descriptor up front in debug mode. This provides a good error message to
         // the user when they get something wrong, but doesn't re-validate in release mode.
-        debug_assert_ne!(
-            0,
-            descriptor.width(),
-            "Cannot allocate an array with 0 Width"
-        );
 
-        if !descriptor.flags().contains(ArrayObjectFlags::LAYERED) && descriptor.depth() > 0 {
-            debug_assert_ne!(
+        if cfg!(debug_assertions) {
+            assert_ne!(
                 0,
-                descriptor.height(),
-                "If Depth is non-zero and the descriptor is not LAYERED, then Height must also be \
-                 non-zero."
-            );
-        }
-
-        if descriptor.flags().contains(ArrayObjectFlags::CUBEMAP) {
-            debug_assert_eq!(
-                descriptor.height(),
                 descriptor.width(),
-                "Height and Width must be equal for CUBEMAP arrays."
+                "Cannot allocate an array with 0 Width"
             );
 
-            if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
-                debug_assert_eq!(
+            if !descriptor.flags().contains(ArrayObjectFlags::LAYERED) && descriptor.depth() > 0 {
+                assert_ne!(
                     0,
-                    descriptor.depth() % 6,
-                    "Depth must be a multiple of 6 when the array descriptor is for a LAYERED \
-                     CUBEMAP."
+                    descriptor.height(),
+                    "If Depth is non-zero and the descriptor is not LAYERED, then Height must also \
+                    be non-zero."
                 );
-            } else {
-                debug_assert_eq!(
-                    6,
-                    descriptor.depth(),
-                    "Depth must be equal to 6 when the array descriptor is for a CUBEMAP."
+            }
+
+            if descriptor.flags().contains(ArrayObjectFlags::CUBEMAP) {
+                assert_eq!(
+                    descriptor.height(),
+                    descriptor.width(),
+                    "Height and Width must be equal for CUBEMAP arrays."
+                );
+
+                if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
+                    assert_eq!(
+                        0,
+                        descriptor.depth() % 6,
+                        "Depth must be a multiple of 6 when the array descriptor is for a LAYERED \
+                         CUBEMAP."
+                    );
+                } else {
+                    assert_eq!(
+                        6,
+                        descriptor.depth(),
+                        "Depth must be equal to 6 when the array descriptor is for a CUBEMAP."
+                    );
+                }
+            }
+
+            assert!(
+                descriptor.num_channels() == 1
+                    || descriptor.num_channels() == 2
+                    || descriptor.num_channels() == 4,
+                "NumChannels was set to {}. It must be 1, 2, or 4.",
+                descriptor.num_channels()
+            );
+
+            // Exhaustively check bounds of arrays
+            let device = CurrentContext::get_device()?;
+
+            let attr = |attr: DeviceAttribute| {
+                Ok(
+                    1..(device.get_attribute(DeviceAttribute::MaximumTextureCubemapLayeredWidth)?
+                        as usize)
+                        + 1,
+                )
+            };
+
+            let bounds: Vec<[std::ops::Range<usize>; 3]> =
+                if descriptor.flags().contains(ArrayObjectFlags::CUBEMAP) {
+                    if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
+                        vec![[
+                            attr(DeviceAttribute::MaximumTextureCubemapLayeredWidth)?,
+                            attr(DeviceAttribute::MaximumTextureCubemapLayeredWidth)?,
+                            attr(DeviceAttribute::MaximumTextureCubemapLayeredLayers)?,
+                        ]]
+                    } else {
+                        vec![[
+                            attr(DeviceAttribute::MaximumTextureCubemapWidth)?,
+                            attr(DeviceAttribute::MaximumTextureCubemapWidth)?,
+                            6..7,
+                        ]]
+                    }
+                } else if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
+                    if descriptor.height() > 0 {
+                        // 2D Layered array
+                        vec![[
+                            attr(DeviceAttribute::MaximumTexture2DLayeredWidth)?,
+                            attr(DeviceAttribute::MaximumTexture2DLayeredHeight)?,
+                            attr(DeviceAttribute::MaximumTexture2DLayeredLayers)?,
+                        ]]
+                    } else {
+                        // 1D Layered array
+                        vec![[
+                            attr(DeviceAttribute::MaximumTexture1DLayeredWidth)?,
+                            0..1,
+                            attr(DeviceAttribute::MaximumTexture1DLayeredLayers)?,
+                        ]]
+                    }
+                } else if descriptor.depth() > 0 {
+                    // 3D Array
+                    vec![
+                        [
+                            attr(DeviceAttribute::MaximumTexture3DWidth)?,
+                            attr(DeviceAttribute::MaximumTexture3DHeight)?,
+                            attr(DeviceAttribute::MaximumTexture3DDepth)?,
+                        ],
+                        [
+                            attr(DeviceAttribute::MaximumTexture3DWidthAlternate)?,
+                            attr(DeviceAttribute::MaximumTexture3DHeightAlternate)?,
+                            attr(DeviceAttribute::MaximumTexture3DDepthAlternate)?,
+                        ],
+                    ]
+                } else if descriptor.height() > 0 {
+                    // 2D Array
+                    vec![[
+                        attr(DeviceAttribute::MaximumTexture2DWidth)?,
+                        attr(DeviceAttribute::MaximumTexture2DHeight)?,
+                        0..1,
+                    ]]
+                } else {
+                    // 1D Array
+                    assert!(descriptor.width() > 0);
+                    vec![[attr(DeviceAttribute::MaximumTexture1DWidth)?, 0..1, 0..1]]
+                };
+
+            if !bounds.iter().any(|x| {
+                (descriptor.width() >= x[0].start && descriptor.width() < x[0].end)
+                    && (descriptor.height() >= x[1].start && descriptor.height() < x[1].end)
+                    && (descriptor.depth() >= x[2].start && descriptor.depth() < x[2].end)
+            }) {
+                panic!(
+                    "The dimensions of the ArrayObject did not fall within the valid bounds for \
+                     the type of the array. descriptor = {:?}, dims = {:?}, valid bounds = {:?}",
+                    descriptor,
+                    [descriptor.width(), descriptor.height(), descriptor.depth()],
+                    bounds
                 );
             }
         }
-
-        debug_assert!(
-            descriptor.num_channels() == 1
-                || descriptor.num_channels() == 2
-                || descriptor.num_channels() == 4,
-            "NumChannels was set to {}. It must be 1, 2, or 4.",
-            descriptor.num_channels()
-        );
 
         let mut handle = unsafe { std::mem::uninitialized() };
         unsafe { cuda_sys::cuda::cuArray3DCreate_v2(&mut handle, &descriptor.desc) }.to_result()?;
