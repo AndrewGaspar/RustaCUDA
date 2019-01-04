@@ -11,6 +11,10 @@ use crate::context::CurrentContext;
 use crate::device::DeviceAttribute;
 use crate::error::*;
 
+mod typed;
+
+pub use self::typed::*;
+
 /// Describes the format used for a CUDA Array.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ArrayFormat {
@@ -278,39 +282,51 @@ impl ArrayObject {
                 )
             };
 
-            let bounds: Vec<[std::ops::Range<usize>; 3]> =
-                if descriptor.flags().contains(ArrayObjectFlags::CUBEMAP) {
-                    if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
+            let (description, bounds) = if descriptor.flags().contains(ArrayObjectFlags::CUBEMAP) {
+                if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
+                    (
+                        "Layered Cubemap",
                         vec![[
                             attr(DeviceAttribute::MaximumTextureCubemapLayeredWidth)?,
                             attr(DeviceAttribute::MaximumTextureCubemapLayeredWidth)?,
                             attr(DeviceAttribute::MaximumTextureCubemapLayeredLayers)?,
-                        ]]
-                    } else {
+                        ]],
+                    )
+                } else {
+                    (
+                        "Cubemap",
                         vec![[
                             attr(DeviceAttribute::MaximumTextureCubemapWidth)?,
                             attr(DeviceAttribute::MaximumTextureCubemapWidth)?,
                             6..7,
-                        ]]
-                    }
-                } else if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
-                    if descriptor.height() > 0 {
-                        // 2D Layered array
+                        ]],
+                    )
+                }
+            } else if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
+                if descriptor.height() > 0 {
+                    (
+                        "2D Layered",
                         vec![[
                             attr(DeviceAttribute::MaximumTexture2DLayeredWidth)?,
                             attr(DeviceAttribute::MaximumTexture2DLayeredHeight)?,
                             attr(DeviceAttribute::MaximumTexture2DLayeredLayers)?,
-                        ]]
-                    } else {
-                        // 1D Layered array
+                        ]],
+                    )
+                } else {
+                    // 1D Layered array
+                    (
+                        "1D Layered",
                         vec![[
                             attr(DeviceAttribute::MaximumTexture1DLayeredWidth)?,
                             0..1,
                             attr(DeviceAttribute::MaximumTexture1DLayeredLayers)?,
-                        ]]
-                    }
-                } else if descriptor.depth() > 0 {
-                    // 3D Array
+                        ]],
+                    )
+                }
+            } else if descriptor.depth() > 0 {
+                // 3D Array
+                (
+                    "3D",
                     vec![
                         [
                             attr(DeviceAttribute::MaximumTexture3DWidth)?,
@@ -322,19 +338,40 @@ impl ArrayObject {
                             attr(DeviceAttribute::MaximumTexture3DHeightAlternate)?,
                             attr(DeviceAttribute::MaximumTexture3DDepthAlternate)?,
                         ],
-                    ]
-                } else if descriptor.height() > 0 {
-                    // 2D Array
-                    vec![[
-                        attr(DeviceAttribute::MaximumTexture2DWidth)?,
-                        attr(DeviceAttribute::MaximumTexture2DHeight)?,
-                        0..1,
-                    ]]
+                    ],
+                )
+            } else if descriptor.height() > 0 {
+                // 2D Array
+                if descriptor
+                    .flags()
+                    .contains(ArrayObjectFlags::TEXTURE_GATHER)
+                {
+                    (
+                        "2D Texture Gather",
+                        vec![[
+                            attr(DeviceAttribute::MaximumTexture2DGatherWidth)?,
+                            attr(DeviceAttribute::MaximumTexture2DGatherHeight)?,
+                            0..1,
+                        ]],
+                    )
                 } else {
-                    // 1D Array
-                    assert!(descriptor.width() > 0);
-                    vec![[attr(DeviceAttribute::MaximumTexture1DWidth)?, 0..1, 0..1]]
-                };
+                    (
+                        "2D",
+                        vec![[
+                            attr(DeviceAttribute::MaximumTexture2DWidth)?,
+                            attr(DeviceAttribute::MaximumTexture2DHeight)?,
+                            0..1,
+                        ]],
+                    )
+                }
+            } else {
+                // 1D Array
+                assert!(descriptor.width() > 0);
+                (
+                    "1D",
+                    vec![[attr(DeviceAttribute::MaximumTexture1DWidth)?, 0..1, 0..1]],
+                )
+            };
 
             if !bounds.iter().any(|x| {
                 (descriptor.width() >= x[0].start && descriptor.width() < x[0].end)
@@ -342,11 +379,12 @@ impl ArrayObject {
                     && (descriptor.depth() >= x[2].start && descriptor.depth() < x[2].end)
             }) {
                 panic!(
-                    "The dimensions of the ArrayObject did not fall within the valid bounds for \
-                     the type of the array. descriptor = {:?}, dims = {:?}, valid bounds = {:?}",
-                    descriptor,
-                    [descriptor.width(), descriptor.height(), descriptor.depth()],
-                    bounds
+                    "The dimensions of the {} ArrayObject did not fall within the valid bounds for \
+                     the array. descriptor = {:?}, dims = {:?}, valid bounds = {:?}",
+                     description,
+                     descriptor,
+                     [descriptor.width(), descriptor.height(), descriptor.depth()],
+                     bounds
                 );
             }
         }
