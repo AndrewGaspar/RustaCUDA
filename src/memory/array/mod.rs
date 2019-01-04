@@ -274,13 +274,7 @@ impl ArrayObject {
             // Exhaustively check bounds of arrays
             let device = CurrentContext::get_device()?;
 
-            let attr = |attr: DeviceAttribute| {
-                Ok(
-                    1..(device.get_attribute(DeviceAttribute::MaximumTextureCubemapLayeredWidth)?
-                        as usize)
-                        + 1,
-                )
-            };
+            let attr = |attr| Ok(1..(device.get_attribute(attr)? as usize) + 1);
 
             let (description, bounds) = if descriptor.flags().contains(ArrayObjectFlags::CUBEMAP) {
                 if descriptor.flags().contains(ArrayObjectFlags::LAYERED) {
