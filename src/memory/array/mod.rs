@@ -223,7 +223,6 @@ impl ArrayObject {
     pub fn from_descriptor(descriptor: &ArrayDescriptor) -> CudaResult<Self> {
         // We validate the descriptor up front in debug mode. This provides a good error message to
         // the user when they get something wrong, but doesn't re-validate in release mode.
-
         if cfg!(debug_assertions) {
             assert_ne!(
                 0,
@@ -307,7 +306,6 @@ impl ArrayObject {
                         ]],
                     )
                 } else {
-                    // 1D Layered array
                     (
                         "1D Layered",
                         vec![[
@@ -318,7 +316,6 @@ impl ArrayObject {
                     )
                 }
             } else if descriptor.depth() > 0 {
-                // 3D Array
                 (
                     "3D",
                     vec![
@@ -335,7 +332,6 @@ impl ArrayObject {
                     ],
                 )
             } else if descriptor.height() > 0 {
-                // 2D Array
                 if descriptor
                     .flags()
                     .contains(ArrayObjectFlags::TEXTURE_GATHER)
@@ -359,7 +355,6 @@ impl ArrayObject {
                     )
                 }
             } else {
-                // 1D Array
                 assert!(descriptor.width() > 0);
                 (
                     "1D",
