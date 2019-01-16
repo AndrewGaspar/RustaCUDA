@@ -11,9 +11,8 @@ use crate::context::CurrentContext;
 use crate::device::DeviceAttribute;
 use crate::error::*;
 
-mod typed;
-
-pub use self::typed::*;
+#[cfg(feature = "typed-arrays")]
+pub mod typed;
 
 /// Describes the format used for a CUDA Array.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -15,8 +15,16 @@ categories = ["api-bindings", "concurrency"]
 travis-ci = { repository = "bheisler/RustaCUDA" }
 maintenance = { status = "actively-developed" }
 
+[features]
+typed-arrays = ["ndarray"]
+
 [dependencies]
-cuda-sys = "0.2"
+cuda-sys = { path = "../cuda-sys" }
 bitflags = "1.0"
+ndarray = { version = "0.12.1", optional = true }
 rustacuda_derive = { version = "0.1.0", path = "rustacuda_derive" }
 rustacuda_core = { version = "0.1.0", path = "rustacuda_core" }
+
+[[example]]
+name = "texture"
+required-features = ["typed-arrays"]
